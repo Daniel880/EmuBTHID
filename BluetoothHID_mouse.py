@@ -52,11 +52,21 @@ class BluetoothHIDService(object):
         self.P_CTRL = 0x0011
         self.P_INTR = 0x0013
         self.SELFMAC = MAC
+        self.service_record = service_record
+        self.remote_mac = remote_mac
         self.bus = dbus.SystemBus()
         self.manager = None
         self.ccontrol = None
         self.cinter = None
+        self.connected = False
+        self.sock_control_listen = None
+        self.sock_inter_listen = None
         
+        # Initial connection
+        self._connect()
+    
+    def _connect(self):
+        """Internal method to establish connection"""
         # Try to cleanup any existing profile first
         self.cleanup_profile()
         
@@ -65,7 +75,7 @@ class BluetoothHIDService(object):
 
         BluetoothHIDProfile(self.bus, self.PROFILE_PATH)
         opts = {
-            "ServiceRecord": service_record,
+            "ServiceRecord": self.service_record,
             "Name": "BTMouseProfile",
             "RequireAuthentication": False,
             "RequireAuthorization": False,
@@ -77,48 +87,103 @@ class BluetoothHIDService(object):
         print("Registered")
 
         # If remote_mac is provided, try to connect to existing device
-        if remote_mac:
-            print(f"Attempting to connect to existing device: {remote_mac}")
+        if self.remote_mac:
+            print(f"Attempting to connect to existing device: {self.remote_mac}")
             try:
                 sock_control = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
                 sock_control.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 sock_inter = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
                 sock_inter.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 
-                print(f"Connecting control channel to {remote_mac}:{self.P_CTRL}...")
-                sock_control.connect((remote_mac, self.P_CTRL))
+                print(f"Connecting control channel to {self.remote_mac}:{self.P_CTRL}...")
+                sock_control.connect((self.remote_mac, self.P_CTRL))
                 print("Control channel connected!")
                 
-                print(f"Connecting interrupt channel to {remote_mac}:{self.P_INTR}...")
-                sock_inter.connect((remote_mac, self.P_INTR))
+                print(f"Connecting interrupt channel to {self.remote_mac}:{self.P_INTR}...")
+                sock_inter.connect((self.remote_mac, self.P_INTR))
                 print("Interrupt channel connected!")
                 
                 self.ccontrol = sock_control
                 self.cinter = sock_inter
+                self.connected = True
                 return
             except Exception as e:
                 print(f"Failed to connect to existing device: {e}")
                 print("Falling back to waiting for incoming connection...")
         
         # Fall back to waiting for incoming connection
-        sock_control = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
-        sock_control.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock_inter = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
-        sock_inter.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock_control.bind((self.SELFMAC, self.P_CTRL))
-        sock_inter.bind((self.SELFMAC, self.P_INTR))
+        self.sock_control_listen = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
+        self.sock_control_listen.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock_inter_listen = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
+        self.sock_inter_listen.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock_control_listen.bind((self.SELFMAC, self.P_CTRL))
+        self.sock_inter_listen.bind((self.SELFMAC, self.P_INTR))
         
-        sock_control.listen(1)
-        sock_inter.listen(1)
-        print(f"Waiting for connection at controller {MAC}...")
-        self.ccontrol, cinfo = sock_control.accept()
+        self.sock_control_listen.listen(1)
+        self.sock_inter_listen.listen(1)
+        print(f"Waiting for connection at controller {self.SELFMAC}...")
+        self.ccontrol, cinfo = self.sock_control_listen.accept()
         print("Control channel connected to " + cinfo[self.HOST])
-        self.cinter, cinfo = sock_inter.accept()
+        self.remote_mac = cinfo[self.HOST]  # Save remote MAC for reconnection
+        self.cinter, cinfo = self.sock_inter_listen.accept()
         print("Interrupt channel connected to " + cinfo[self.HOST])
+        self.connected = True
+    
+    def reconnect(self, max_attempts=5, delay=2):
+        """Attempt to reconnect after connection loss"""
+        print(f"\n⚠️  Connection lost! Attempting to reconnect to {self.remote_mac}...")
+        
+        # Close existing connections
+        try:
+            if self.ccontrol:
+                self.ccontrol.close()
+            if self.cinter:
+                self.cinter.close()
+        except:
+            pass
+        
+        self.connected = False
+        
+        for attempt in range(1, max_attempts + 1):
+            try:
+                print(f"Reconnection attempt {attempt}/{max_attempts}...")
+                
+                # Try to connect to the known remote device
+                if self.remote_mac:
+                    sock_control = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
+                    sock_control.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    sock_inter = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
+                    sock_inter.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    
+                    sock_control.connect((self.remote_mac, self.P_CTRL))
+                    print("✓ Control channel reconnected!")
+                    
+                    sock_inter.connect((self.remote_mac, self.P_INTR))
+                    print("✓ Interrupt channel reconnected!")
+                    
+                    self.ccontrol = sock_control
+                    self.cinter = sock_inter
+                    self.connected = True
+                    print("✓ Reconnection successful!\n")
+                    return True
+                    
+            except Exception as e:
+                print(f"✗ Attempt {attempt} failed: {e}")
+                if attempt < max_attempts:
+                    print(f"Waiting {delay} seconds before retry...")
+                    time.sleep(delay)
+        
+        print(f"✗ Failed to reconnect after {max_attempts} attempts")
+        return False
 
     def send(self, bytes_buf):
-        if self.cinter:
-            self.cinter.send(bytes_buf)
+        if self.cinter and self.connected:
+            try:
+                self.cinter.send(bytes_buf)
+            except (ConnectionResetError, BrokenPipeError, OSError) as e:
+                print(f"\n⚠️  Send failed: {e}")
+                self.connected = False
+                raise  # Re-raise to let caller handle reconnection
             
     def cleanup_profile(self):
         """Unregister the profile if it exists"""
@@ -141,7 +206,12 @@ class BluetoothHIDService(object):
                 self.ccontrol.close()
             if self.cinter:
                 self.cinter.close()
+            if self.sock_control_listen:
+                self.sock_control_listen.close()
+            if self.sock_inter_listen:
+                self.sock_inter_listen.close()
         except:
             pass
             
         self.cleanup_profile()
+        self.connected = False

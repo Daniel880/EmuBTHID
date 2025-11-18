@@ -7,16 +7,16 @@ from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
 
 """
-Change this CONTROLLER_MAC to the mac of your own device
+Controller MAC will be detected automatically
 """
-CONTROLLER_MAC = "5C:F3:70:AA:D9:CF"
+CONTROLLER_MAC = None  # Will be auto-detected
 
 # Import the modified BluetoothHID service for mouse
 from BluetoothHID_mouse import BluetoothHIDService
 
 class MouseEmulator:
-    def __init__(self, send_callback):
-        self.send_callback = send_callback
+    def __init__(self, bthid_service):
+        self.bthid_service = bthid_service
         self.mouse_state = bytearray([
             0xA1,
             0x02,  # Report ID
@@ -24,6 +24,26 @@ class MouseEmulator:
             0x00,  # X displacement
             0x00,  # Y displacement
         ])
+    
+    def send_with_reconnect(self, data):
+        """Send data with automatic reconnection on failure"""
+        max_retries = 3
+        for retry in range(max_retries):
+            try:
+                self.bthid_service.send(data)
+                return True
+            except (ConnectionResetError, BrokenPipeError, OSError) as e:
+                if retry < max_retries - 1:
+                    print(f"Attempting to reconnect (retry {retry + 1}/{max_retries})...")
+                    if self.bthid_service.reconnect():
+                        continue  # Try sending again
+                    else:
+                        print("Reconnection failed!")
+                        return False
+                else:
+                    print("Max retries reached!")
+                    return False
+        return False
         
     def move_mouse(self, x_displacement, y_displacement):
         """
@@ -40,7 +60,8 @@ class MouseEmulator:
         self.mouse_state[4] = y_displacement if y_displacement >= 0 else (256 + y_displacement)
         
         print(f"Moving mouse: X={x_displacement}, Y={y_displacement}")
-        self.send_callback(bytes(self.mouse_state))
+        if not self.send_with_reconnect(bytes(self.mouse_state)):
+            raise Exception("Failed to send mouse movement after reconnection attempts")
         
         # Reset to zero movement after sending
         self.mouse_state[3] = 0x00
@@ -52,12 +73,14 @@ class MouseEmulator:
         """
         # Press button
         self.mouse_state[2] |= 1 << (button - 1)
-        self.send_callback(bytes(self.mouse_state))
+        if not self.send_with_reconnect(bytes(self.mouse_state)):
+            raise Exception("Failed to send mouse click after reconnection attempts")
         time.sleep(0.05)  # Small delay
         
         # Release button
         self.mouse_state[2] &= ~(1 << (button - 1))
-        self.send_callback(bytes(self.mouse_state))
+        if not self.send_with_reconnect(bytes(self.mouse_state)):
+            raise Exception("Failed to send mouse release after reconnection attempts")
         
     def demo_movement(self):
         """
@@ -122,6 +145,26 @@ class MouseEmulator:
             print("\n\nDemo stopped by user")
 
 
+def get_controller_mac():
+    """Get MAC address of the local Bluetooth adapter"""
+    try:
+        bus = dbus.SystemBus()
+        manager = dbus.Interface(bus.get_object("org.bluez", "/"), "org.freedesktop.DBus.ObjectManager")
+        objects = manager.GetManagedObjects()
+        
+        for path, interfaces in objects.items():
+            if "org.bluez.Adapter1" in interfaces:
+                adapter = interfaces["org.bluez.Adapter1"]
+                mac = adapter.get("Address")
+                name = adapter.get("Name", "Unknown")
+                print(f"Found Bluetooth adapter: {name} ({mac})")
+                return mac
+        return None
+    except Exception as e:
+        print(f"Error finding Bluetooth adapter: {e}")
+        return None
+
+
 def get_connected_device_mac():
     """Get MAC address of connected Bluetooth device"""
     try:
@@ -169,13 +212,21 @@ if __name__ == '__main__':
     try:
         print("Initializing Bluetooth HID Service...")
         
+        # Auto-detect controller MAC if not specified
+        controller_mac = CONTROLLER_MAC
+        if not controller_mac:
+            controller_mac = get_controller_mac()
+            if not controller_mac:
+                print("ERROR: Could not detect Bluetooth adapter MAC address!")
+                sys.exit(1)
+        
         # Try to find already connected device
         remote_mac = get_connected_device_mac()
         
-        bthid_srv = BluetoothHIDService(service_record, CONTROLLER_MAC, remote_mac)
+        bthid_srv = BluetoothHIDService(service_record, controller_mac, remote_mac)
         
         print("\nBluetooth HID Service connected!")
-        emulator = MouseEmulator(bthid_srv.send)
+        emulator = MouseEmulator(bthid_srv)
         
         # Run the demo
         emulator.demo_movement()

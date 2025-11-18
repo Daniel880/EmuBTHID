@@ -8,11 +8,31 @@ from evdev_xkb_map import evdev_xkb_map, modkeys
 import keymap
 from Xlib import X, display, Xutil
 from dbus.mainloop.glib import DBusGMainLoop
+import dbus
 
 """
-Change this CONTROLLER_MAC to the mac of your own device
+Controller MAC will be detected automatically
 """
-CONTROLLER_MAC = "5C:F3:70:AA:D9:CF"
+CONTROLLER_MAC = None  # Will be auto-detected
+
+def get_controller_mac():
+    """Get MAC address of the local Bluetooth adapter"""
+    try:
+        bus = dbus.SystemBus()
+        manager = dbus.Interface(bus.get_object("org.bluez", "/"), "org.freedesktop.DBus.ObjectManager")
+        objects = manager.GetManagedObjects()
+        
+        for path, interfaces in objects.items():
+            if "org.bluez.Adapter1" in interfaces:
+                adapter = interfaces["org.bluez.Adapter1"]
+                mac = adapter.get("Address")
+                name = adapter.get("Name", "Unknown")
+                print(f"Found Bluetooth adapter: {name} ({mac})")
+                return mac
+        return None
+    except Exception as e:
+        print(f"Error finding Bluetooth adapter: {e}")
+        return None
 
 usbhid_map = {}
 with open("keycode.txt") as f:
@@ -228,7 +248,15 @@ if __name__ == '__main__':
     d = display.Display()
     d.change_keyboard_control(auto_repeat_mode=X.AutoRepeatModeOff)
     try:
-        bthid_srv = BluetoothHIDService(service_record, CONTROLLER_MAC)
+        # Auto-detect controller MAC if not specified
+        controller_mac = CONTROLLER_MAC
+        if not controller_mac:
+            controller_mac = get_controller_mac()
+            if not controller_mac:
+                print("ERROR: Could not detect Bluetooth adapter MAC address!")
+                sys.exit(1)
+        
+        bthid_srv = BluetoothHIDService(service_record, controller_mac)
         Window(d).loop(bthid_srv.send)
         #Window(d).loop(print)
     finally:

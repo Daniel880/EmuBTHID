@@ -12,7 +12,7 @@ from dbus.mainloop.glib import DBusGMainLoop
 """
 Change this CONTROLLER_MAC to the mac of your own device
 """
-CONTROLLER_MAC = "5C:87:9C:96:BE:5E"
+CONTROLLER_MAC = "5C:F3:70:AA:D9:CF"
 
 usbhid_map = {}
 with open("keycode.txt") as f:

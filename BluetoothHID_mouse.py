@@ -48,7 +48,7 @@ class BluetoothHIDService(object):
     HOST = 0
     PORT = 1
 
-    def __init__(self, service_record, MAC):
+    def __init__(self, service_record, MAC, remote_mac=None):
         self.P_CTRL = 0x0011
         self.P_INTR = 0x0013
         self.SELFMAC = MAC
@@ -73,6 +73,34 @@ class BluetoothHIDService(object):
             "Role": "server"
         }
 
+        self.manager.RegisterProfile(self.PROFILE_PATH, "00001124-0000-1000-8000-00805f9b34fb", opts)
+        print("Registered")
+
+        # If remote_mac is provided, try to connect to existing device
+        if remote_mac:
+            print(f"Attempting to connect to existing device: {remote_mac}")
+            try:
+                sock_control = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
+                sock_control.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock_inter = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
+                sock_inter.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                
+                print(f"Connecting control channel to {remote_mac}:{self.P_CTRL}...")
+                sock_control.connect((remote_mac, self.P_CTRL))
+                print("Control channel connected!")
+                
+                print(f"Connecting interrupt channel to {remote_mac}:{self.P_INTR}...")
+                sock_inter.connect((remote_mac, self.P_INTR))
+                print("Interrupt channel connected!")
+                
+                self.ccontrol = sock_control
+                self.cinter = sock_inter
+                return
+            except Exception as e:
+                print(f"Failed to connect to existing device: {e}")
+                print("Falling back to waiting for incoming connection...")
+        
+        # Fall back to waiting for incoming connection
         sock_control = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
         sock_control.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock_inter = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
@@ -80,12 +108,9 @@ class BluetoothHIDService(object):
         sock_control.bind((self.SELFMAC, self.P_CTRL))
         sock_inter.bind((self.SELFMAC, self.P_INTR))
         
-        self.manager.RegisterProfile(self.PROFILE_PATH, "00001124-0000-1000-8000-00805f9b34fb", opts)
-        print("Registered")
-        
         sock_control.listen(1)
         sock_inter.listen(1)
-        print(f"waiting for connection at controller {MAC}, please double check with the MAC in bluetoothctl")
+        print(f"Waiting for connection at controller {MAC}...")
         self.ccontrol, cinfo = sock_control.accept()
         print("Control channel connected to " + cinfo[self.HOST])
         self.cinter, cinfo = sock_inter.accept()

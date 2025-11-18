@@ -122,6 +122,27 @@ class MouseEmulator:
             print("\n\nDemo stopped by user")
 
 
+def get_connected_device_mac():
+    """Get MAC address of connected Bluetooth device"""
+    try:
+        bus = dbus.SystemBus()
+        manager = dbus.Interface(bus.get_object("org.bluez", "/"), "org.freedesktop.DBus.ObjectManager")
+        objects = manager.GetManagedObjects()
+        
+        for path, interfaces in objects.items():
+            if "org.bluez.Device1" in interfaces:
+                device = interfaces["org.bluez.Device1"]
+                if device.get("Connected", False):
+                    mac = device.get("Address")
+                    name = device.get("Name", "Unknown")
+                    print(f"Found connected device: {name} ({mac})")
+                    return mac
+        return None
+    except Exception as e:
+        print(f"Error finding connected device: {e}")
+        return None
+
+
 def cleanup_profile():
     """Cleanup any existing Bluetooth profile registration"""
     import dbus
@@ -147,7 +168,11 @@ if __name__ == '__main__':
     bthid_srv = None
     try:
         print("Initializing Bluetooth HID Service...")
-        bthid_srv = BluetoothHIDService(service_record, CONTROLLER_MAC)
+        
+        # Try to find already connected device
+        remote_mac = get_connected_device_mac()
+        
+        bthid_srv = BluetoothHIDService(service_record, CONTROLLER_MAC, remote_mac)
         
         print("\nBluetooth HID Service connected!")
         emulator = MouseEmulator(bthid_srv.send)

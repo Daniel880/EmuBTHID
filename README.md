@@ -9,9 +9,9 @@ Based on https://github.com/Alkaid-Benetnash/EmuBTHID.
 - Python 3 with the deps in `requirements.txt` (dbus-python, pycairo, PyGObject).
 - Root/sudo to bind the HID L2CAP ports.
 
-Install Python deps
+Install Ubuntu dep
 ```bash
-python3 -m pip install -r requirements.txt
+sudo apt update && sudo apt install python3 python3-dbus python3-dbus python3-cairo python3-gi
 ```
 
 ## Quick Start

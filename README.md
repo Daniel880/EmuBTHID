@@ -6,7 +6,6 @@ Based on https://github.com/Alkaid-Benetnash/EmuBTHID.
 
 ## Requirements
 - Linux with BlueZ running (`bluetoothd`).
-- Python 3 with the deps in `requirements.txt` (dbus-python, pycairo, PyGObject).
 - Root/sudo to bind the HID L2CAP ports.
 
 Install Ubuntu dep

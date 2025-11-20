@@ -29,6 +29,20 @@ ExecStart=
 ExecStart=/usr/libexec/bluetooth/bluetoothd -P input
 ```
 
+The file should look like this:
+
+```bash
+### Editing /etc/systemd/system/bluetooth.service.d/override.conf
+### Anything between here and the comment below will become the contents of the drop-in file
+
+[Service]
+ExecStart=
+ExecStart=/usr/libexec/bluetooth/bluetoothd -P input
+
+### Edits below this comment will be discarded
+
+```
+
 3) Reload and restart bluetooth service
 
 ```bash
@@ -55,5 +69,14 @@ sudo python3 main.py
 ```  
 
 
-7) It will immediately start the circle-drawing demo. Stop with `Ctrl+C`. 
+7) It will immediately start the circle-drawing demo. Stop with `Ctrl+C`.
+
+## After work revert changes of the bluetooth service:
+```bash
+sudo systemctl revert bluetooth
+sudo systemctl daemon-reload
+sudo systemctl restart bluetooth
+```
+
+
 
